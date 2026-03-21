@@ -1,0 +1,50 @@
+# Copie este ficheiro para: .github/workflows/flight-track-daily.yml
+# (O PAT do GitHub MCP costuma nao ter permissao para escrever em .github/workflows/;
+#  git push a partir do seu Mac ou a UI do GitHub aceitam o ficheiro no caminho certo.)
+#
+# Roda o tracker na nuvem (GitHub Actions) — nao precisa do Mac ligado.
+# Configure em Settings → Secrets and variables → Actions:
+#   SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+# Opcional: SLACK_THREAD_TS
+#
+# Horario: 12:00 UTC ≈ 09:00 em Brasilia (UTC-3).
+
+name: Flight track daily
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install-deps chromium
+          python -m playwright install chromium
+
+      - name: Rodar tracker
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_THREAD_TS: ${{ secrets.SLACK_THREAD_TS }}
+          HEADLESS: "1"
+          PAGE_TIMEOUT_MS: "90000"
+        run: python tracker.py

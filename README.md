@@ -4,6 +4,8 @@ Rastreia precos no Google Flights e envia um resumo diario no Slack (**canal**, 
 
 **Guia completo (GitHub push, PAT, Railway ou Render, slash `/flight-track`):** [docs/DEPLOY.md](docs/DEPLOY.md)
 
+**Workflow GitHub Actions:** copie [docs/flight-track-daily.yml](docs/flight-track-daily.yml) para `.github/workflows/flight-track-daily.yml` se ainda não existir no repo (tokens MCP/API muitas vezes não conseguem criar ficheiros em `.github/workflows/`).
+
 ## Requisitos
 
 - macOS (para `launchd`)
@@ -87,7 +89,8 @@ O `launchd` so roda com o computador ligado. Para **agendar na nuvem**, use **Gi
    - `SLACK_BOT_TOKEN` — `xoxb-...`
    - `SLACK_CHANNEL_ID` — `C...` ou `G...`
    - *(opcional)* `SLACK_THREAD_TS` — thread pai (`1234567890.123456` ou `p...`)
-3. O workflow [`.github/workflows/flight-track-daily.yml`](.github/workflows/flight-track-daily.yml) roda **todo dia ~09h Brasilia** (cron em UTC) e tambem pode ser disparado manualmente em **Actions → Flight track daily → Run workflow**.
+3. Garanta o ficheiro `.github/workflows/flight-track-daily.yml` (pode copiar de [docs/flight-track-daily.yml](docs/flight-track-daily.yml)).
+4. O workflow roda **todo dia ~09h Brasilia** (cron 12:00 UTC) e pode ser disparado em **Actions → Flight track daily → Run workflow**.
 
 Os voos vêm do [`flights.json`](flights.json) **versionado no repo** — para mudar links, edite o arquivo e faça commit (ou PR).
 
@@ -95,11 +98,11 @@ Os voos vêm do [`flights.json`](flights.json) **versionado no repo** — para m
 
 Passo a passo detalhado: **[docs/DEPLOY.md](docs/DEPLOY.md)** (Parte A).
 
-Resumo — crie o repo vazio no GitHub e:
+Resumo — exemplo com `thiagorocha-2`:
 
 ```bash
 cd /Users/nuver/Documents/Cursor/flight-track
-git remote add origin git@github.com:SEU_USUARIO/flight-track.git
+git remote set-url origin git@github.com:thiagorocha-2/flight-track.git
 git branch -M main
 git push -u origin main
 ```

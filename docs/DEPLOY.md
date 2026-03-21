@@ -21,12 +21,16 @@ cd /Users/nuver/Documents/Cursor/flight-track
 git config user.name "Seu Nome"
 git config user.email "seu-email@exemplo.com"
 
-git remote add origin git@github.com:SEU_USUARIO/flight-track.git
+git remote set-url origin git@github.com:thiagorocha-2/flight-track.git
 git branch -M main
 git push -u origin main
 ```
 
-*(Se preferir HTTPS: `https://github.com/SEU_USUARIO/flight-track.git` — o GitHub vai pedir login/token.)*
+*(Se preferir HTTPS: `https://github.com/thiagorocha-2/flight-track.git` — o GitHub vai pedir login/token.)*
+
+### Workflow do GitHub Actions
+
+Se subiu ficheiros via API/MCP e **não** existe `.github/workflows/flight-track-daily.yml`, copie o conteúdo de [`flight-track-daily.yml`](./flight-track-daily.yml) para **Add file** → `.github/workflows/flight-track-daily.yml` na UI do GitHub (ou faça `git push` a partir do Mac). Tokens sem permissão **Workflows** costumam receber 404 ao tentar criar essa pasta via API.
 
 ### Secrets do GitHub Actions (tracker diário)
 
@@ -80,7 +84,7 @@ O app expõe:
 |----------|-------------|-----------------|
 | `SLACK_SIGNING_SECRET` | Sim | App Slack → **Basic Information** → **Signing Secret** |
 | `GITHUB_TOKEN` | Sim | PAT da Parte B |
-| `GITHUB_REPO` | Sim | `seu-usuario/flight-track` |
+| `GITHUB_REPO` | Sim | `thiagorocha-2/flight-track` |
 | `GITHUB_BRANCH` | Não | `main` (padrão no código se omitir) |
 | `TRIGGER_WORKFLOW_AFTER_ADD` | Não | `true` — dispara o workflow após cada `/flight-track` (PAT precisa **Actions: write**) |
 | `SLACK_ALLOW_USER_IDS` | Não | `U123,U456` — só esses usuários podem usar o comando |
