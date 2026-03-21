@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+price_history.json
+*.log
+_mcp_push.json
+_mcp_push_part1.json
+_mcp_push_part2.json
