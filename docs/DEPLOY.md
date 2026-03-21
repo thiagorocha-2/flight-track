@@ -21,7 +21,7 @@ cd /Users/nuver/Documents/Cursor/flight-track
 git config user.name "Seu Nome"
 git config user.email "seu-email@exemplo.com"
 
-git remote add origin git@github.com:thiagorocha-2/flight-track.git
+git remote set-url origin git@github.com:thiagorocha-2/flight-track.git
 git branch -M main
 git push -u origin main
 ```
@@ -30,7 +30,7 @@ git push -u origin main
 
 ### Workflow do GitHub Actions
 
-Se subiu ficheiros via API/MCP e **não** existe `.github/workflows/flight-track-daily.yml`, copie o conteúdo de [`docs/flight-track-daily.yml`](flight-track-daily.yml) para **Add file** → `.github/workflows/flight-track-daily.yml` na UI do GitHub (ou faça `git push` a partir do Mac). Tokens sem permissão **Workflows** costumam receber 404 ao tentar criar essa pasta via API.
+Se subiu ficheiros via API/MCP e **não** existe `.github/workflows/flight-track-daily.yml`, copie o conteúdo de [`flight-track-daily.yml`](./flight-track-daily.yml) para **Add file** → `.github/workflows/flight-track-daily.yml` na UI do GitHub (ou faça `git push` a partir do Mac). Tokens sem permissão **Workflows** costumam receber 404 ao tentar criar essa pasta via API.
 
 ### Secrets do GitHub Actions (tracker diário)
 
