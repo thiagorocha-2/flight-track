@@ -1,0 +1,24 @@
+# Render Blueprint: New Blueprint → conecte o repo e use este arquivo
+# Ajuste o nome do servico se quiser. Secrets preencha no dashboard (sync: false).
+
+services:
+  - type: web
+    name: flight-track-slack
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: GITHUB_BRANCH
+        value: main
+      - key: TRIGGER_WORKFLOW_AFTER_ADD
+        value: "false"
+      - key: GITHUB_WORKFLOW_FILE
+        value: flight-track-daily.yml

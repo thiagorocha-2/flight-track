@@ -2,6 +2,8 @@
 
 Rastreia precos no Google Flights e envia um resumo diario no Slack (**canal**, **conversa em grupo** ou **DM**).
 
+**Guia completo (GitHub push, PAT, Railway ou Render, slash `/flight-track`):** [docs/DEPLOY.md](docs/DEPLOY.md)
+
 ## Requisitos
 
 - macOS (para `launchd`)
@@ -91,24 +93,20 @@ Os voos vêm do [`flights.json`](flights.json) **versionado no repo** — para m
 
 ## GitHub: subir o repositorio
 
-Eu **nao tenho acesso** à sua conta GitHub daqui; o que fiz foi deixar o projeto pronto para commit/push **no seu Mac**:
+Passo a passo detalhado: **[docs/DEPLOY.md](docs/DEPLOY.md)** (Parte A).
+
+Resumo — crie o repo vazio no GitHub e:
 
 ```bash
 cd /Users/nuver/Documents/Cursor/flight-track
-git init
-git add .
-git commit -m "chore: flight-track + Actions + servidor Slack"
-```
-
-Crie um repo vazio no GitHub e:
-
-```bash
 git remote add origin git@github.com:SEU_USUARIO/flight-track.git
 git branch -M main
 git push -u origin main
 ```
 
 > **Importante:** nunca commite `.env`. Se um token vazou em algum arquivo, **revogue e gere outro** em [Slack API](https://api.slack.com/apps) → *OAuth & Permissions*.
+
+Arquivos de deploy: [`railway.toml`](railway.toml) (Railway) e [`render.yaml`](render.yaml) (Render Blueprint).
 
 ## Adicionar voos pelo Slack (`/flight-track`)
 
@@ -133,7 +131,7 @@ Crie um [Fine-grained personal access token](https://github.com/settings/tokens?
 
 ### 2) Hospedar o servidor (HTTPS obrigatorio)
 
-Ex.: **Railway**, **Render**, **Fly.io** — use o [`Dockerfile`](Dockerfile) deste repo (imagem leve, **sem** Playwright).
+Instruções clicáveis: **[docs/DEPLOY.md — Parte C](docs/DEPLOY.md#parte-c--hospedar-o-servidor-escolha-uma-opção)** (Railway ou Render). O repo inclui [`railway.toml`](railway.toml) e [`render.yaml`](render.yaml).
 
 **Variaveis de ambiente no provedor:**
 
