@@ -12,7 +12,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -496,10 +496,27 @@ def main() -> int:
         logging.error("flights.json deve ser uma lista de objetos")
         return 1
 
-    results: list[FlightResult] = []
+    today = date.today()
+    active_flights: list[dict] = []
+    skipped = 0
     for item in flights_raw:
         if not isinstance(item, dict):
             continue
+        td = str(item.get("travel_date", "")).strip()
+        if td:
+            try:
+                if date.fromisoformat(td) < today:
+                    logging.info("Voo expirado (travel_date=%s): %s", td, item.get("name"))
+                    skipped += 1
+                    continue
+            except ValueError:
+                pass
+        active_flights.append(item)
+    if skipped:
+        logging.info("Ignorados %d voo(s) com data de viagem passada", skipped)
+
+    results: list[FlightResult] = []
+    for item in active_flights:
         name = str(item.get("name", "Sem nome")).strip()
         url = str(item.get("url", "")).strip()
         logging.info("Processando: %s", name)
