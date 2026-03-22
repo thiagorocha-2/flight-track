@@ -91,6 +91,7 @@ O `launchd` so roda com o computador ligado. Para **agendar na nuvem**, use **Gi
    - *(opcional)* `SLACK_THREAD_TS` — thread pai (`1234567890.123456` ou `p...`)
 3. Copie [docs/flight-track-daily.yml](docs/flight-track-daily.yml) para `.github/workflows/flight-track-daily.yml` e faça commit (ou use o ficheiro ja presente no clone local).
 4. O workflow roda **todo dia ~09h Brasilia** (cron 12:00 UTC) e pode ser disparado em **Actions → Flight track daily → Run workflow**.
+5. **Histórico entre runs:** o workflow faz *upload* do `price_history.json` como artifact `price-history` e, no dia seguinte, tenta *download* do último job com sucesso na mesma branch — assim o Slack pode mostrar “subiu / baixou” em vez de “sem histórico”. O primeiro run após ativar isto pode ainda não ter artifact anterior (é normal).
 
 Os voos vêm do [`flights.json`](flights.json) **versionado no repo** — para mudar links, edite o arquivo e faça commit (ou PR).
 

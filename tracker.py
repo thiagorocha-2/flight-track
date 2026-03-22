@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coleta precos do Google Flights, compara com historico e envia resumo por DM no Slack.
+Coleta preços do Google Flights, compara com histórico e envia resumo por DM no Slack.
 """
 
 from __future__ import annotations
@@ -23,13 +23,13 @@ from playwright.sync_api import sync_playwright
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-# Diretorio do projeto (para launchd com WorkingDirectory)
+# Diretório do projeto (para launchd com WorkingDirectory)
 ROOT = Path(__file__).resolve().parent
 FLIGHTS_PATH = ROOT / "flights.json"
 HISTORY_PATH = ROOT / "price_history.json"
 LOG_PATH = Path.home() / "Library" / "Logs" / "flight-track.log"
 
-# Precos em BRL plausiveis (evita lixo de texto da pagina)
+# Preços em BRL plausíveis (evita lixo de texto da página)
 MIN_PRICE_BRL = 50.0
 MAX_PRICE_BRL = 500_000.0
 
@@ -48,11 +48,29 @@ BRL_PREFIX_RE = re.compile(
     r"\bBRL\s*([\d]{1,3}(?:\.[\d]{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
     re.IGNORECASE,
 )
+# Texto por extenso / acessibilidade (headless as vezes so expoe assim)
+REAIS_RE = re.compile(
+    r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*reais?\b",
+    re.IGNORECASE,
+)
 
-USER_AGENT = (
+USER_AGENT_MAC = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
+# No GitHub Actions (Linux) o UA de Mac pode gerar layout/captcha diferente
+USER_AGENT_LINUX = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def _playwright_user_agent(headless: bool) -> str:
+    if os.environ.get("PLAYWRIGHT_USER_AGENT", "").strip():
+        return os.environ["PLAYWRIGHT_USER_AGENT"].strip()
+    if headless and os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        return USER_AGENT_LINUX
+    return USER_AGENT_MAC
 
 
 def setup_logging() -> None:
@@ -148,7 +166,7 @@ def normalize_for_price_scan(text: str) -> str:
 def collect_page_price_text(page: Page) -> str:
     """
     Junta texto visivel do body com aria-labels e rotulos curtos de botoes/links.
-    O Google Flights costuma expor precos em aria-label mesmo quando o layout
+    O Google Flights costuma expor preços em aria-label mesmo quando o layout
     quebra inner_text do body em headless.
     """
     chunks: list[str] = []
@@ -177,6 +195,10 @@ def collect_page_price_text(page: Page) -> str:
                     const t = (el.innerText || '').trim();
                     if (t && t.length < 200) parts.push(t);
                 });
+                document.querySelectorAll('[data-gs], [data-value]').forEach(el => {
+                    const t = (el.innerText || '').trim();
+                    if (t && t.length > 3 && t.length < 180 && /\\d/.test(t)) parts.push(t);
+                });
                 return parts.join(' ');
             }"""
         )
@@ -188,13 +210,24 @@ def collect_page_price_text(page: Page) -> str:
 
 
 def extract_lowest_brl_price(page_text: str) -> float | None:
-    """Extrai o menor valor em R$ plausivel do texto da pagina."""
+    """Extrai o menor valor em R$ plausível do texto da página."""
     candidates: list[float] = []
-    for pattern in (BRL_RE, BRL_SUFFIX_RE, BRL_PREFIX_RE):
+    for pattern in (BRL_RE, BRL_SUFFIX_RE, BRL_PREFIX_RE, REAIS_RE):
         for m in pattern.finditer(page_text):
             val = parse_brl_to_float(m.group(1))
             if val is not None and MIN_PRICE_BRL <= val <= MAX_PRICE_BRL:
                 candidates.append(val)
+    # Alguns layouts: so numeros brasileiros em linhas com "preço/total/menor"
+    if not candidates:
+        for line in page_text.split("\n"):
+            low = line.lower()
+            if not any(k in low for k in ("preço", "preco", "total", "menor", "viagem", "passagem")):
+                continue
+            for pattern in (BRL_RE, BRL_SUFFIX_RE, BRL_PREFIX_RE, REAIS_RE):
+                for m in pattern.finditer(line):
+                    val = parse_brl_to_float(m.group(1))
+                    if val is not None and MIN_PRICE_BRL <= val <= MAX_PRICE_BRL:
+                        candidates.append(val)
     if not candidates:
         return None
     return min(candidates)
@@ -221,8 +254,9 @@ def scrape_flight_price(url: str, headless: bool, timeout_ms: int) -> tuple[floa
             ],
         )
         try:
+            ua = _playwright_user_agent(headless)
             context = browser.new_context(
-                user_agent=USER_AGENT,
+                user_agent=ua,
                 locale="pt-BR",
                 timezone_id="America/Sao_Paulo",
                 viewport={"width": 1920, "height": 1080},
@@ -238,7 +272,7 @@ def scrape_flight_price(url: str, headless: bool, timeout_ms: int) -> tuple[floa
             try:
                 page.goto(url.strip(), wait_until="domcontentloaded", timeout=timeout_ms)
             except PlaywrightTimeoutError:
-                return None, "Timeout ao carregar a pagina"
+                return None, "Timeout ao carregar a página"
 
             # Paginas /booking/ hidratam mais devagar (multi-trecho, etc.), sobretudo no Linux headless.
             is_booking = "/booking" in url
@@ -247,47 +281,62 @@ def scrape_flight_price(url: str, headless: bool, timeout_ms: int) -> tuple[floa
             else:
                 page.wait_for_timeout(2_000)
             try:
-                page.wait_for_load_state("networkidle", timeout=20_000)
+                page.wait_for_load_state("networkidle", timeout=25_000)
             except PlaywrightTimeoutError:
                 logging.debug("networkidle timeout; seguindo mesmo assim")
 
-            # Varias tentativas: GF demora a hidratar precos, sobretudo em headless.
-            per_attempt_wait = min(15_000, max(6_000, timeout_ms // 3))
-            max_attempts = 6 if is_booking else 4
+            # Fecha dialogos (cookies, etc.) que bloqueiam conteudo
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+
+            # Várias tentativas: GF demora a hidratar preços, sobretudo em headless.
+            per_attempt_wait = min(18_000, max(7_000, timeout_ms // 3))
+            max_attempts = 8 if is_booking else 4
+            if is_booking and timeout_ms >= 90_000:
+                max_attempts = max(max_attempts, 9)
             price: float | None = None
             for attempt in range(1, max_attempts + 1):
                 try:
                     page.wait_for_selector("text=R$", timeout=per_attempt_wait)
                 except PlaywrightTimeoutError:
                     try:
-                        page.wait_for_selector("text=BRL", timeout=min(8_000, per_attempt_wait))
+                        page.wait_for_selector("text=BRL", timeout=min(10_000, per_attempt_wait))
                     except PlaywrightTimeoutError:
-                        logging.info(
-                            "Tentativa %s/%s: R$/BRL nao apareceu a tempo; seguindo",
-                            attempt,
-                            max_attempts,
-                        )
+                        try:
+                            page.wait_for_selector("text=/preço|preco|reais/i", timeout=6_000)
+                        except PlaywrightTimeoutError:
+                            logging.info(
+                                "Tentativa %s/%s: moeda/preço não apareceu a tempo; seguindo",
+                                attempt,
+                                max_attempts,
+                            )
 
-                page.wait_for_timeout(2_500 if is_booking else 2_000)
-                # Scroll para forcar listas / cards de precos (ex.: "Menor preço total")
-                scrolls = 10 if is_booking else 6
+                page.wait_for_timeout(3_000 if is_booking else 2_000)
+                # Scroll + PageDown (lazy load do GF as vezes so responde a um dos dois)
+                scrolls = 12 if is_booking else 6
                 step = 650
                 for _ in range(scrolls):
                     page.evaluate("(dy) => window.scrollBy(0, dy)", step)
                     page.wait_for_timeout(400)
+                if is_booking:
+                    for _ in range(6):
+                        page.keyboard.press("PageDown")
+                        page.wait_for_timeout(450)
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(600)
+                page.wait_for_timeout(800)
                 page.evaluate("window.scrollTo(0, 0)")
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(600)
 
                 blob = collect_page_price_text(page)
                 price = extract_lowest_brl_price(blob)
                 if price is not None:
                     break
-                page.wait_for_timeout(5_000 if is_booking else 3_500)
+                page.wait_for_timeout(6_000 if is_booking else 3_500)
 
             if price is None:
-                return None, "Nao foi possivel encontrar preco em R$ na pagina"
+                return None, "Não foi possível encontrar preço em R$ na página"
             return price, None
         finally:
             browser.close()
@@ -305,7 +354,7 @@ def format_price_line(
     assert price is not None
     formatted = format_brl_display(price)
     if prev is None:
-        delta = " (novo — sem historico)"
+        delta = " (novo — sem histórico)"
     elif price < prev - 0.01:
         diff = prev - price
         delta = f" (baixou {format_brl_display(diff)})"
@@ -313,7 +362,7 @@ def format_price_line(
         diff = price - prev
         delta = f" (subiu {format_brl_display(diff)})"
     else:
-        delta = " (sem mudanca)"
+        delta = " (sem mudança)"
     link = f"<{flight_url}|abrir no Google Flights>" if flight_url.strip() else ""
     suffix = f" — {link}" if link else ""
     return f"• *{name}*: {formatted}{delta}{suffix}"
@@ -332,7 +381,7 @@ def build_slack_message(results: list[FlightResult], history: dict[str, Any]) ->
                 prev_price = None
         lines.append(format_price_line(r.name, r.price, prev_price, r.error, r.url))
     lines.append("")
-    lines.append("_Fonte: Google Flights (scraping local). Precos podem variar na hora da compra._")
+    lines.append("_Fonte: Google Flights (scraping local). Preços podem variar na hora da compra._")
     return "\n".join(lines)
 
 
@@ -384,7 +433,7 @@ def send_slack_notification(
         except SlackApiError as e:
             logging.error("Falha ao abrir DM: %s", e.response.get("error", e))
             raise
-        logging.info("Enviando DM para usuario: %s", dm_user_id)
+        logging.info("Enviando DM para usuário: %s", dm_user_id)
     else:
         raise ValueError("Defina SLACK_CHANNEL_ID (canal/grupo) ou SLACK_USER_ID (DM) no .env")
 
@@ -439,7 +488,7 @@ def main() -> int:
         return 1
 
     if not skip_slack and slack_thread_ts and not slack_channel_id:
-        logging.error("SLACK_THREAD_TS so funciona junto com SLACK_CHANNEL_ID (mesma conversa)")
+        logging.error("SLACK_THREAD_TS só funciona junto com SLACK_CHANNEL_ID (mesma conversa)")
         return 1
 
     flights_raw = load_json(FLIGHTS_PATH, [])
@@ -463,7 +512,7 @@ def main() -> int:
 
     message = build_slack_message(results, history)
     if skip_slack:
-        logging.warning("SKIP_SLACK=1 — mensagem nao enviada ao Slack")
+        logging.warning("SKIP_SLACK=1 — mensagem não enviada ao Slack")
         logging.info("Preview da mensagem:\n%s", message)
     else:
         try:
@@ -479,7 +528,7 @@ def main() -> int:
 
     update_history(history, results)
     save_json(HISTORY_PATH, history)
-    logging.info("Concluido. Historico atualizado em %s", HISTORY_PATH)
+    logging.info("Concluído. Histórico atualizado em %s", HISTORY_PATH)
     return 0
 
 

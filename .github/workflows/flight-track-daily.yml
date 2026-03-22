@@ -1,9 +1,12 @@
-# Roda o tracker na nuvem (GitHub Actions) — nao precisa do Mac ligado.
+# Roda o tracker na nuvem (GitHub Actions) — não precisa do Mac ligado.
 # Configure em Settings → Secrets and variables → Actions:
 #   SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
 # Opcional: SLACK_THREAD_TS
 #
-# Horario: 12:00 UTC ≈ 09:00 em Brasilia (UTC-3).
+# Histórico de preços: o job faz upload de `price_history.json` como artifact
+# `price-history` e, no próximo run, baixa o artifact do último job com sucesso.
+#
+# Horário: 12:00 UTC ≈ 09:00 em Brasília (UTC-3).
 
 name: Flight track daily
 
@@ -14,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   track:
@@ -22,6 +26,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Último run com sucesso (para restaurar histórico)
+        id: prev_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rid=$(gh run list --repo "${{ github.repository }}" \
+            --workflow "flight-track-daily.yml" \
+            --branch "${{ github.ref_name }}" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq 'if length > 0 then .[0].databaseId else "" end')
+          echo "run_id=$rid" >> "$GITHUB_OUTPUT"
+          echo "Último run com sucesso na branch (para artifact): ${rid:-<nenhum>}"
+
+      - name: Baixar price_history.json (artifact do run anterior)
+        if: steps.prev_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: price-history
+          path: ${{ github.workspace }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.prev_run.outputs.run_id }}
 
       - name: Python
         uses: actions/setup-python@v5
@@ -42,5 +71,14 @@ jobs:
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           SLACK_THREAD_TS: ${{ secrets.SLACK_THREAD_TS }}
           HEADLESS: "1"
-          PAGE_TIMEOUT_MS: "90000"
+          PAGE_TIMEOUT_MS: "120000"
         run: python tracker.py
+
+      - name: Upload price_history.json (próximo run)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: price-history
+          path: price_history.json
+          retention-days: 90
+          if-no-files-found: warn
