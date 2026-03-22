@@ -39,6 +39,15 @@ BRL_RE = re.compile(
     r"R\s*[\$＄]\s*([\d]{1,3}(?:\.[\d]{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
     re.IGNORECASE,
 )
+# Em alguns layouts (sobretudo headless/Linux) o valor aparece como "3.300 BRL" ou "BRL 3.300"
+BRL_SUFFIX_RE = re.compile(
+    r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*BRL\b",
+    re.IGNORECASE,
+)
+BRL_PREFIX_RE = re.compile(
+    r"\bBRL\s*([\d]{1,3}(?:\.[\d]{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
+    re.IGNORECASE,
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -143,10 +152,15 @@ def collect_page_price_text(page: Page) -> str:
     quebra inner_text do body em headless.
     """
     chunks: list[str] = []
-    try:
-        chunks.append(page.inner_text("body", timeout=30_000))
-    except Exception as e:
-        logging.debug("inner_text(body) falhou: %s", e)
+    for sel in ("body", "main", '[role="main"]'):
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                t = loc.first.inner_text(timeout=25_000)
+                if t and t.strip():
+                    chunks.append(t)
+        except Exception as e:
+            logging.debug("inner_text(%s) falhou: %s", sel, e)
     try:
         extra: str = page.evaluate(
             """() => {
@@ -158,6 +172,10 @@ def collect_page_price_text(page: Page) -> str:
                 document.querySelectorAll('[role="button"], [role="link"]').forEach(el => {
                     const t = (el.innerText || '').trim();
                     if (t && t.length < 220) parts.push(t);
+                });
+                document.querySelectorAll('[class*="price"], [class*="Price"]').forEach(el => {
+                    const t = (el.innerText || '').trim();
+                    if (t && t.length < 200) parts.push(t);
                 });
                 return parts.join(' ');
             }"""
@@ -172,10 +190,11 @@ def collect_page_price_text(page: Page) -> str:
 def extract_lowest_brl_price(page_text: str) -> float | None:
     """Extrai o menor valor em R$ plausivel do texto da pagina."""
     candidates: list[float] = []
-    for m in BRL_RE.finditer(page_text):
-        val = parse_brl_to_float(m.group(1))
-        if val is not None and MIN_PRICE_BRL <= val <= MAX_PRICE_BRL:
-            candidates.append(val)
+    for pattern in (BRL_RE, BRL_SUFFIX_RE, BRL_PREFIX_RE):
+        for m in pattern.finditer(page_text):
+            val = parse_brl_to_float(m.group(1))
+            if val is not None and MIN_PRICE_BRL <= val <= MAX_PRICE_BRL:
+                candidates.append(val)
     if not candidates:
         return None
     return min(candidates)
@@ -196,52 +215,76 @@ def scrape_flight_price(url: str, headless: bool, timeout_ms: int) -> tuple[floa
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--lang=pt-BR",
+            ],
         )
         try:
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 locale="pt-BR",
                 timezone_id="America/Sao_Paulo",
-                viewport={"width": 1365, "height": 900},
+                viewport={"width": 1920, "height": 1080},
                 device_scale_factor=1,
+                extra_http_headers={
+                    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
             )
             context.add_init_script(
                 "try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch (e) {}"
             )
             page = context.new_page()
             try:
-                page.goto(url.strip(), wait_until="load", timeout=timeout_ms)
+                page.goto(url.strip(), wait_until="domcontentloaded", timeout=timeout_ms)
             except PlaywrightTimeoutError:
                 return None, "Timeout ao carregar a pagina"
 
+            # Paginas /booking/ hidratam mais devagar (multi-trecho, etc.), sobretudo no Linux headless.
+            is_booking = "/booking" in url
+            if is_booking:
+                page.wait_for_timeout(5_000)
+            else:
+                page.wait_for_timeout(2_000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=20_000)
+            except PlaywrightTimeoutError:
+                logging.debug("networkidle timeout; seguindo mesmo assim")
+
             # Varias tentativas: GF demora a hidratar precos, sobretudo em headless.
-            per_attempt_wait = min(12_000, max(5_000, timeout_ms // 4))
-            max_attempts = 3
+            per_attempt_wait = min(15_000, max(6_000, timeout_ms // 3))
+            max_attempts = 6 if is_booking else 4
             price: float | None = None
             for attempt in range(1, max_attempts + 1):
                 try:
                     page.wait_for_selector("text=R$", timeout=per_attempt_wait)
                 except PlaywrightTimeoutError:
-                    logging.info(
-                        "Tentativa %s/%s: seletor R$ nao apareceu a tempo; seguindo",
-                        attempt,
-                        max_attempts,
-                    )
+                    try:
+                        page.wait_for_selector("text=BRL", timeout=min(8_000, per_attempt_wait))
+                    except PlaywrightTimeoutError:
+                        logging.info(
+                            "Tentativa %s/%s: R$/BRL nao apareceu a tempo; seguindo",
+                            attempt,
+                            max_attempts,
+                        )
 
-                page.wait_for_timeout(2_000)
+                page.wait_for_timeout(2_500 if is_booking else 2_000)
                 # Scroll para forcar listas / cards de precos (ex.: "Menor preço total")
-                for _ in range(5):
-                    page.evaluate("window.scrollBy(0, 500)")
-                    page.wait_for_timeout(350)
+                scrolls = 10 if is_booking else 6
+                step = 650
+                for _ in range(scrolls):
+                    page.evaluate("(dy) => window.scrollBy(0, dy)", step)
+                    page.wait_for_timeout(400)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(600)
                 page.evaluate("window.scrollTo(0, 0)")
-                page.wait_for_timeout(400)
+                page.wait_for_timeout(500)
 
                 blob = collect_page_price_text(page)
                 price = extract_lowest_brl_price(blob)
                 if price is not None:
                     break
-                page.wait_for_timeout(4_000)
+                page.wait_for_timeout(5_000 if is_booking else 3_500)
 
             if price is None:
                 return None, "Nao foi possivel encontrar preco em R$ na pagina"
